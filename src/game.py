@@ -45,6 +45,7 @@ player.goto(0, -HEIGHT//2 + 50)
 score = 0
 high_score = load_high_score()
 lives = LIVES
+shield_active = False
 
 score_display = t.Turtle()
 score_display.hideturtle()
@@ -53,9 +54,10 @@ score_display.penup()
 score_display.goto(-WIDTH//2 + 20, HEIGHT//2 - 40)
 
 def update_score_display():
+    shield_status = "Shield: ON" if shield_active else "Shield: OFF"
     score_display.clear()
-    score_display.write(f"Score: {score} | High Score: {high_score} | Lives: {'❤️' * lives}", 
-                       font=("Arial", 18, "bold"))
+    score_display.write(f"Score: {score} | High Score: {high_score} | Lives: {'❤️' * lives} | {shield_status}", 
+                       font=("Arial", 16, "bold"))
 
 # Stars
 stars = []
@@ -74,6 +76,14 @@ meteor.penup()
 meteor.goto(random.randint(-WIDTH//2+40, WIDTH//2-40), HEIGHT//2 - 80)
 meteor.setheading(270)
 
+# Shield Power-up
+shield = t.Turtle()
+shield.shape("circle")
+shield.color("blue")
+shield.penup()
+shield.hideturtle()
+shield.goto(0, HEIGHT + 100) # Start off-screen
+
 # Controls
 def go_left():
     x = player.xcor() - SPEED
@@ -86,12 +96,15 @@ def go_right():
     player.setx(x)
 
 def start_game():
-    global game_active, score, lives
+    global game_active, score, lives, shield_active
     game_active = True
     score = 0
     lives = LIVES
+    shield_active = False
     player.goto(0, -HEIGHT//2 + 50)
     meteor.goto(random.randint(-WIDTH//2+40, WIDTH//2-40), HEIGHT//2 - 80)
+    shield.hideturtle()
+    shield.goto(0, HEIGHT + 100)
     update_score_display()
     main_game_loop()
 
@@ -125,7 +138,7 @@ def show_game_over():
               align="center", font=("Arial", 20, "bold"))
 
 def main_game_loop():
-    global game_active, score, lives
+    global game_active, score, lives, shield_active
     
     while game_active and lives > 0:
         # Increase difficulty with score
@@ -135,6 +148,19 @@ def main_game_loop():
         meteor.sety(meteor.ycor() - current_meteor_speed)
         if meteor.ycor() < -HEIGHT//2:
             meteor.goto(random.randint(-WIDTH//2+40, WIDTH//2-40), HEIGHT//2 - 80)
+
+        # Shield power-up logic
+        if score > 0 and score % 2 == 0 and not shield.isvisible() and not shield_active:
+            shield.goto(random.randint(-WIDTH//2+20, WIDTH//2-20), 
+                        random.randint(-HEIGHT//2+20, HEIGHT//2-60))
+            shield.showturtle()
+
+        # Collect shield
+        if shield.isvisible() and collision(player, shield, 20):
+            shield_active = True
+            shield.hideturtle()
+            shield.goto(0, HEIGHT + 100)
+            update_score_display()
 
         # Collect stars
         for s in stars:
@@ -146,18 +172,24 @@ def main_game_loop():
 
         # Check meteor collision
         if collision(player, meteor, 30):
-            lives -= 1
-            update_score_display()
-            if lives > 0:
+            if shield_active:
+                shield_active = False
                 meteor.goto(random.randint(-WIDTH//2+40, WIDTH//2-40), HEIGHT//2 - 80)
-                player.goto(0, -HEIGHT//2 + 50)
-                time.sleep(1)
+                update_score_display()
             else:
-                game_active = False
-                show_game_over()
+                lives -= 1
+                update_score_display()
+                if lives > 0:
+                    meteor.goto(random.randint(-WIDTH//2+40, WIDTH//2-40), HEIGHT//2 - 80)
+                    player.goto(0, -HEIGHT//2 + 50)
+                    time.sleep(1)
+                else:
+                    game_active = False
+                    show_game_over()
 
         screen.update()
         time.sleep(0.01)
+
 
 # Start with the start screen
 game_active = False
