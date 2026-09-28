@@ -1,6 +1,5 @@
 import turtle as t
 import random
-import time
 import os
 from pathlib import Path
 
@@ -10,6 +9,14 @@ SPEED = 15
 METEOR_SPEED = 6
 LIVES = 3
 HIGH_SCORE_FILE = "high_score.txt"
+FRAME_DELAY_MS = 10        # time between game-loop ticks
+HIT_PAUSE_MS = 1000        # short pause after losing a life
+
+# Game states. A single flag decides what SPACE does and whether the loop runs,
+# so pressing SPACE mid-game can no longer start a second, nested game loop.
+STATE_START = "start"
+STATE_PLAYING = "playing"
+STATE_GAME_OVER = "game_over"
 
 def load_high_score():
     try:
@@ -84,20 +91,41 @@ shield.penup()
 shield.hideturtle()
 shield.goto(0, HEIGHT + 100) # Start off-screen
 
+# On-screen message (start screen / game over). One reusable turtle, so the
+# text can be cleared when a new game begins.
+message = t.Turtle()
+message.hideturtle()
+message.color("white")
+message.penup()
+
+def show_message(text, size):
+    message.clear()
+    message.write(text, align="center", font=("Arial", size, "bold"))
+
+def clear_message():
+    message.clear()
+
 # Controls
 def go_left():
+    if game_state != STATE_PLAYING:
+        return
     x = player.xcor() - SPEED
     if x < -WIDTH//2 + 20: x = -WIDTH//2 + 20
     player.setx(x)
 
 def go_right():
+    if game_state != STATE_PLAYING:
+        return
     x = player.xcor() + SPEED
     if x > WIDTH//2 - 20: x = WIDTH//2 - 20
     player.setx(x)
 
 def start_game():
-    global game_active, score, lives, shield_active
-    game_active = True
+    global game_state, score, lives, shield_active
+    if game_state == STATE_PLAYING:
+        return  # ignore SPACE while a game is already running
+    game_state = STATE_PLAYING
+    clear_message()
     score = 0
     lives = LIVES
     shield_active = False
@@ -106,7 +134,8 @@ def start_game():
     shield.hideturtle()
     shield.goto(0, HEIGHT + 100)
     update_score_display()
-    main_game_loop()
+    screen.update()
+    screen.ontimer(game_tick, FRAME_DELAY_MS)
 
 screen.listen()
 screen.onkeypress(go_left, "Left")
@@ -117,81 +146,84 @@ def collision(a, b, dist=25):
     return a.distance(b) < dist
 
 def show_start_screen():
-    start_text = t.Turtle()
-    start_text.hideturtle()
-    start_text.color("white")
-    start_text.penup()
-    start_text.write("Press SPACE to Start!", align="center", 
-                    font=("Arial", 24, "bold"))
+    show_message("Press SPACE to Start!", 24)
+    screen.update()
 
 def show_game_over():
-    global high_score
+    global high_score, game_state
+    game_state = STATE_GAME_OVER
     if score > high_score:
         high_score = score
         save_high_score(high_score)
+        update_score_display()
     
-    end = t.Turtle()
-    end.hideturtle()
-    end.color("white")
-    end.penup()
-    end.write(f"Game Over!\nFinal Score: {score}\nPress SPACE to Play Again", 
-              align="center", font=("Arial", 20, "bold"))
+    show_message(f"Game Over!\nFinal Score: {score}\nPress SPACE to Play Again", 20)
+    screen.update()
 
-def main_game_loop():
-    global game_active, score, lives, shield_active
+def game_tick():
+    """Advance the game by one frame, then schedule the next frame.
     
-    while game_active and lives > 0:
-        # Increase difficulty with score
-        current_meteor_speed = METEOR_SPEED + (score // 10)
+    Uses screen.ontimer instead of a blocking while-loop, so key presses are
+    handled between frames and never re-enter the loop.
+    """
+    global score, lives, shield_active
         
-        # Move meteor
-        meteor.sety(meteor.ycor() - current_meteor_speed)
-        if meteor.ycor() < -HEIGHT//2:
-            meteor.goto(random.randint(-WIDTH//2+40, WIDTH//2-40), HEIGHT//2 - 80)
+    if game_state != STATE_PLAYING:
+        return
 
-        # Shield power-up logic
-        if score > 0 and score % 2 == 0 and not shield.isvisible() and not shield_active:
-            shield.goto(random.randint(-WIDTH//2+20, WIDTH//2-20), 
-                        random.randint(-HEIGHT//2+20, HEIGHT//2-60))
-            shield.showturtle()
+    next_delay = FRAME_DELAY_MS
 
-        # Collect shield
-        if shield.isvisible() and collision(player, shield, 20):
-            shield_active = True
-            shield.hideturtle()
-            shield.goto(0, HEIGHT + 100)
+    # Increase difficulty with score
+    current_meteor_speed = METEOR_SPEED + (score // 10)
+
+    # Move meteor
+    meteor.sety(meteor.ycor() - current_meteor_speed)
+    if meteor.ycor() < -HEIGHT//2:
+        meteor.goto(random.randint(-WIDTH//2+40, WIDTH//2-40), HEIGHT//2 - 80)
+
+    # Shield power-up logic
+    if score > 0 and score % 2 == 0 and not shield.isvisible() and not shield_active:
+        shield.goto(random.randint(-WIDTH//2+20, WIDTH//2-20), 
+                    random.randint(-HEIGHT//2+20, HEIGHT//2-60))
+        shield.showturtle()
+
+    # Collect shield
+    if shield.isvisible() and collision(player, shield, 20):
+        shield_active = True
+        shield.hideturtle()
+        shield.goto(0, HEIGHT + 100)
+        update_score_display()
+
+    # Collect stars
+    for s in stars:
+        if collision(player, s, 20):
+            s.goto(random.randint(-WIDTH//2+20, WIDTH//2-20), 
+                  random.randint(-HEIGHT//2+20, HEIGHT//2-60))
+            score += 1
             update_score_display()
 
-        # Collect stars
-        for s in stars:
-            if collision(player, s, 20):
-                s.goto(random.randint(-WIDTH//2+20, WIDTH//2-20), 
-                      random.randint(-HEIGHT//2+20, HEIGHT//2-60))
-                score += 1
-                update_score_display()
-
-        # Check meteor collision
-        if collision(player, meteor, 30):
-            if shield_active:
-                shield_active = False
+    # Check meteor collision
+    if collision(player, meteor, 30):
+        if shield_active:
+            shield_active = False
+            meteor.goto(random.randint(-WIDTH//2+40, WIDTH//2-40), HEIGHT//2 - 80)
+            update_score_display()
+        else:
+            lives -= 1
+            update_score_display()
+            if lives > 0:
                 meteor.goto(random.randint(-WIDTH//2+40, WIDTH//2-40), HEIGHT//2 - 80)
-                update_score_display()
+                player.goto(0, -HEIGHT//2 + 50)
+                next_delay = HIT_PAUSE_MS
             else:
-                lives -= 1
-                update_score_display()
-                if lives > 0:
-                    meteor.goto(random.randint(-WIDTH//2+40, WIDTH//2-40), HEIGHT//2 - 80)
-                    player.goto(0, -HEIGHT//2 + 50)
-                    time.sleep(1)
-                else:
-                    game_active = False
-                    show_game_over()
+                show_game_over()
+                return
 
-        screen.update()
-        time.sleep(0.01)
+    screen.update()
+    screen.ontimer(game_tick, next_delay)
 
 
 # Start with the start screen
-game_active = False
+game_state = STATE_START
 show_start_screen()
 t.done()
